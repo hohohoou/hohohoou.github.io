@@ -1,0 +1,14 @@
+{
+  "hoho": {
+    "src": "/assets/ui/hoho-knit-label.png",
+    "width": 2079,
+    "height": 756,
+    "viewBox": "128 90 1821 568"
+  },
+  "contact": {
+    "src": "/assets/ui/lets-chat-knit-label.png",
+    "width": 2079,
+    "height": 756,
+    "viewBox": "70 78 1930 593"
+  }
+}

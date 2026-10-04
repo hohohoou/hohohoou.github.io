@@ -1,0 +1,20 @@
+node_modules
+dist/
+.DS_Store
+*.log
+.env*
+.pnpm-store/
+public/assets/knit/hoho-eye-rig-display.glb
+public/assets/knit/lid-knit-display.glb
+
+# Private local references and generated output are not repository inputs.
+.build-evidence/
+.openai/
+*.zip
+*.tar.gz
+*.pem
+*.key
+public/assets/knit/hoho-knit.glb
+public/assets/knit/hoho-eye-rig.glb
+public/assets/knit/lid-knit.glb
+public/assets/knit/jar-base.glb

@@ -1,0 +1,14 @@
+{
+  "source": "人物角色3d模型.glb",
+  "model": "/assets/knit/hoho-eye-rig.glb",
+  "jarSource": "储藏瓶3d模型.glb",
+  "bodySource": "瓶身3d模型.glb",
+  "lidSource": "瓶盖3d模型.glb",
+  "jarBase": "/assets/knit/jar-base.glb",
+  "lid": "/assets/knit/lid-knit.glb",
+  "displayModel": "/assets/knit/hoho-eye-rig-display.glb",
+  "displayJarBase": "/assets/knit/jar-base-display.glb",
+  "displayLid": "/assets/knit/lid-knit-display.glb",
+  "background": "/assets/knit/scene.png",
+  "poster": "/assets/knit/scene-poster.webp"
+}

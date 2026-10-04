@@ -1,0 +1,24 @@
+[
+  {
+    "target": "public/assets/knit/lid-knit-display.glb",
+    "size": 30575852,
+    "sha256": "35ba598664888ac8cb1e9e77791ec1ba6458c0b8cde5c9ba3bb5cacecd22ca7c",
+    "parts": [
+      "release-assets/lid-knit-display/part-00.bin",
+      "release-assets/lid-knit-display/part-01.bin",
+      "release-assets/lid-knit-display/part-02.bin"
+    ]
+  },
+  {
+    "target": "public/assets/knit/hoho-eye-rig-display.glb",
+    "size": 58915944,
+    "sha256": "dd9e4efedb921367e9df6c317bd2c92ac9c337297990b61d7a0ff473a34be41f",
+    "parts": [
+      "release-assets/hoho-eye-rig-display/part-00.bin",
+      "release-assets/hoho-eye-rig-display/part-01.bin",
+      "release-assets/hoho-eye-rig-display/part-02.bin",
+      "release-assets/hoho-eye-rig-display/part-03.bin",
+      "release-assets/hoho-eye-rig-display/part-04.bin"
+    ]
+  }
+]

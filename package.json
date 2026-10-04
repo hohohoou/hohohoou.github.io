@@ -1,0 +1,39 @@
+{
+  "name": "hoho-portfolio",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node scripts/restore-release-assets.mjs && vite",
+    "build": "node scripts/restore-release-assets.mjs && vite build && node scripts/prepare-static-build.mjs",
+    "preview": "vite preview",
+    "check": "tsc --noEmit",
+    "test": "node --test tests/*.test.mjs",
+    "pages:package": "node scripts/package-pages.mjs"
+  },
+  "dependencies": {
+    "@fontsource/dm-sans": "^5.2.6",
+    "@fontsource/instrument-serif": "^5.2.5",
+    "@phosphor-icons/react": "^2.1.10",
+    "@react-three/drei": "^10.7.0",
+    "@react-three/fiber": "^9.4.0",
+    "@tailwindcss/vite": "^4.1.0",
+    "@vitejs/plugin-react": "5.0.4",
+    "react": "19.2.0",
+    "react-dom": "19.2.0",
+    "tailwindcss": "^4.1.0",
+    "three": "^0.180.0",
+    "vite": "6.4.3"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@types/three": "^0.180.0",
+    "meshoptimizer": "0.22.0",
+    "typescript": "^5.9.0"
+  },
+  "packageManager": "pnpm@11.19.0",
+  "engines": {
+    "node": ">=24.19.0 <25"
+  }
+}
