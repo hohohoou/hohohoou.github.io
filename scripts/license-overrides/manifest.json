@@ -1,0 +1,14 @@
+{
+  "@react-three/fiber@9.7.0": {
+    "file": "react-three-fiber-9.7.0-LICENSE.txt",
+    "source": "https://raw.githubusercontent.com/pmndrs/react-three-fiber/0a107412ac64667b1908422e859447952f57feef/LICENSE",
+    "sha256": "9c35b5de7b7493a707fffe4eb23bd2f7f449153c1911f7c6eefb4e591fd5349a"
+  },
+  "three@0.180.0:fflate@0.8.2": {
+    "file": "fflate-0.8.2-LICENSE.txt",
+    "source": "https://raw.githubusercontent.com/101arrowz/fflate/d3243651cb142e3e04f3e4bc037b9e985878f444/LICENSE",
+    "sha256": "805f6cb28bb8b6d3a0badd83c93bccd9671fa01a3b4b92b7042b0743325ac243",
+    "module": "three/examples/jsm/libs/fflate.module.js",
+    "moduleSha256": "209a4412eb48ce609edb4391992a792ffcc3983d30ee7e2b0b89a8c470f3cd8a"
+  }
+}

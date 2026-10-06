@@ -2,6 +2,7 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { omitDevelopmentModels } from "./scripts/release-assets.mjs";
+import { thirdPartyNotices } from "./scripts/third-party-notices.mjs";
 
 export default defineConfig({
   build: {
@@ -18,5 +19,5 @@ export default defineConfig({
       clientFiles: ["./src/main.tsx"],
     },
   },
-  plugins: [react(), tailwindcss(), omitDevelopmentModels()],
+  plugins: [react(), tailwindcss(), omitDevelopmentModels(), thirdPartyNotices()],
 });
