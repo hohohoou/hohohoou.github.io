@@ -174,7 +174,7 @@ test('rejects truncated, oversized, and same-length corrupted chunks', async t =
   });
 });
 
-test('a failed chunk aborts its outstanding sibling, with at most two requests', async () => {
+test('a failed chunk aborts outstanding siblings, with at most four requests', async () => {
   const {transport} = fixture();
   let requests = 0;
   let aborted = false;
@@ -186,7 +186,7 @@ test('a failed chunk aborts its outstanding sibling, with at most two requests',
       reject(new Error('aborted sibling'));
     }, {once:true}));
   }}), /404/);
-  assert.equal(requests, 2);
+  assert.equal(requests, 4);
   assert.equal(aborted, true);
 });
 
@@ -248,4 +248,78 @@ test('the installed three-stdlib GLTFLoader parses reconstructed GLB bytes', asy
   assert.equal(result.scene.isGroup, true);
   assert.equal(result.parser.json.asset.version, '2.0');
   assert.deepEqual(result.parser.json.scenes, [{nodes:[]}]);
+});
+
+
+test('parallel opening chunks expose only a verified contiguous prefix and are shared', async () => {
+  const first = createChunkPlan(Buffer.from('aaaabbbb'), '/assets/order-first.glb');
+  const last = createChunkPlan(Buffer.from('ccccdddd'), '/assets/order-last.glb');
+  const combined = createChunkPlan(Buffer.from('aaaabbbbccccdddd'), '/assets/order-bundle.glb', 4);
+  first.transport.bundle = {transport:combined.transport, byteOffset:0};
+  last.transport.bundle = {transport:combined.transport, byteOffset:8};
+  const pending = new Map();
+  let calls = 0, earlyDone = false, lastDone = false;
+  const fetcher = url => {calls++; return new Promise(resolve => pending.set(url, resolve));};
+  const a = fetchModelTransport(first.transport, {fetcher}).then(data => {earlyDone=true; return data;});
+  const b = fetchModelTransport(last.transport, {fetcher}).then(data => {lastDone=true; return data;});
+  const finish = i => pending.get(combined.transport.chunks[i].url)(responseFor(combined.assets[i]));
+  const turn = () => new Promise(resolve => setImmediate(resolve));
+  finish(3); finish(1); await turn();
+  assert.equal(earlyDone, false); assert.equal(lastDone, false);
+  finish(0);
+  assert.deepEqual(Buffer.from(await a), Buffer.from('aaaabbbb'));
+  assert.equal(lastDone, false);
+  finish(2);
+  assert.deepEqual(Buffer.from(await b), Buffer.from('ccccdddd'));
+  assert.equal(calls, 4);
+});
+
+test('transient and corrupt chunks retry alone without refetching verified siblings', async t => {
+  for (const failure of ['network', '503', 'truncated', 'corrupt']) await t.test(failure, async () => {
+    const {transport, assets, bytes} = fixture();
+    const counts = new Map();
+    let progress = 0;
+    const data = await fetchModelTransport(transport, {retryDelayMs:0, onProgress(n) {assert.ok(n>progress);progress=n;}, fetcher:async (url, init) => {
+      const count = (counts.get(url) ?? 0) + 1; counts.set(url,count);
+      const asset = assets.find(a => '/'+a.fileName === url);
+      if (url === transport.chunks[0].url && count === 1) {
+        if (failure === 'network') throw new TypeError('connection lost');
+        if (failure === '503') return new Response('',{status:503});
+        if (failure === 'truncated') return new Response(asset.source.subarray(1));
+        const damaged=Buffer.from(asset.source);damaged[0]^=1;return new Response(damaged);
+      }
+      if (count>1) assert.equal(init.cache,'reload');
+      return responseFor(asset);
+    }});
+    assert.deepEqual(Buffer.from(data),bytes);
+    assert.equal(counts.get(transport.chunks[0].url),2);
+    for (const chunk of transport.chunks.slice(1)) assert.equal(counts.get(chunk.url),1);
+    assert.equal(progress,bytes.length);
+  });
+});
+
+test('stalled response headers and body are aborted and retried at most three times', async t => {
+  for (const stage of ['headers','body']) await t.test(stage, async () => {
+    const {transport} = createChunkPlan(Buffer.from('timeout-test'),'/assets/stall.glb');
+    let requests=0, aborts=0;
+    await assert.rejects(fetchModelTransport(transport, {stallTimeoutMs:10,retryDelayMs:0,fetcher:async (_url,{signal}) => {
+      requests++;
+      if(stage==='headers') return new Promise((_,reject) => signal.addEventListener('abort',()=>{aborts++;reject(new Error('aborted'));},{once:true}));
+      return new Response(new ReadableStream({start(controller) {
+        controller.enqueue(new Uint8Array([1]));
+        signal.addEventListener('abort',()=>{aborts++;controller.error(new Error('aborted'));},{once:true});
+      }}));
+    }}),/stalled/);
+    assert.equal(requests,3);assert.equal(aborts,3);
+  });
+});
+
+test('parallel download failure does not start queued chunks after cancellation', async () => {
+  const {transport}=fixture();let requests=0;
+  await assert.rejects(fetchModelTransport(transport,{retryDelayMs:0,fetcher:async (_url,{signal})=>{
+    requests++;
+    if(requests===1)return new Response('',{status:404});
+    return new Promise((_,reject)=>signal.addEventListener('abort',()=>reject(new Error('cancelled')),{once:true}));
+  }}),/404/);
+  assert.equal(requests,4);
 });

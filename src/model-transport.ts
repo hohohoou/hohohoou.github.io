@@ -11,6 +11,8 @@ interface TransferOptions {
   resolveURL?: (url: string) => string;
   onProgress?: (loaded: number, total: number) => void;
   onBytes?: (bytes:Uint8Array,loaded:number) => void;
+  stallTimeoutMs?: number;
+  retryDelayMs?: number;
 }
 
 function validateTransport(transport: ModelTransport) {
@@ -27,14 +29,14 @@ function validateTransport(transport: ModelTransport) {
   if (offset !== transport.byteLength) throw new Error('Model transport length mismatch');
   if (transport.bundle) {
     const {transport:container,byteOffset}=transport.bundle;
-    if (container.bundle || container.encoding || container.chunks.length!==1 || !Number.isSafeInteger(byteOffset) || byteOffset<0 || byteOffset+transport.byteLength>container.byteLength) throw new Error('Invalid model bundle range');
+    if (container.bundle || container.encoding || !Number.isSafeInteger(byteOffset) || byteOffset<0 || byteOffset+transport.byteLength>container.byteLength) throw new Error('Invalid model bundle range');
     validateTransport(container);
   }
   if (transport.encoding && (transport.encoding !== 'gzip' || !Number.isSafeInteger(transport.decodedByteLength) || transport.decodedByteLength! < 1 || !/^[a-f0-9]{64}$/.test(transport.decodedSha256 ?? ''))) throw new Error('Invalid compressed model transport');
 }
 
 // The content-addressed opening bundle is shared by all models and textures.
-// Keep one verified request per page, even when GLTF and image loading overlap.
+// Share one download per page, even when GLTF and image loading overlap.
 interface BundleDownload {bytes?:Uint8Array;loaded:number;complete:boolean;error?:unknown;listeners:Set<()=>void>}
 const bundles=new Map<string,BundleDownload>();
 function fetchBundleSlice(transport:ModelTransport,start:number,length:number,options:TransferOptions):Promise<Uint8Array> {
@@ -70,50 +72,106 @@ export async function fetchModelTransport(transport: ModelTransport, options: Tr
   const fetcher = options.fetcher ?? fetch;
   let next = 0;
   let loaded = 0;
-  const consume = async () => {
-    while (next < transport.chunks.length) {
-      const chunk = transport.chunks[next++];
-      if(transport.bundle){
-        const start=transport.bundle.byteOffset+chunk.byteOffset;
-        const source=await fetchBundleSlice(transport.bundle.transport,start,chunk.byteLength,options);
-        bytes.set(source,chunk.byteOffset);
-        loaded+=chunk.byteLength;
-        options.onProgress?.(loaded,transport.byteLength);
-      }else{
-      // Content hashes change whenever bytes change, so an existing cache entry
-      // is safe even when the hosting layer requires ordinary URLs to revalidate.
-      const cache = chunk.url.includes(`.${chunk.sha256}.`) ? 'force-cache' : 'default';
-      const response = await fetcher(options.resolveURL?.(chunk.url) ?? chunk.url, {cache, ...options.requestInit, signal:abort.signal});
-      if (!response.ok || !response.body) throw new Error(`Model chunk request failed: ${response.status}`);
-      const reader = response.body.getReader();
-      let received = 0;
+  let contiguous = 0;
+  const verified = transport.chunks.map(() => false);
+  const stallTimeoutMs = options.stallTimeoutMs ?? 15000;
+  const retryDelayMs = options.retryDelayMs ?? 250;
+
+  const downloadChunk = async (chunk: ModelChunk) => {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (abort.signal.aborted) throw new Error('Model download cancelled');
+      const request = new AbortController();
+      const cancel = () => request.abort();
+      abort.signal.addEventListener('abort', cancel, {once:true});
+      let stalled = false;
+      let timer: ReturnType<typeof setTimeout>;
+      let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+      let retryable = true;
+      const touch = () => {
+        clearTimeout(timer);
+        timer = setTimeout(() => {stalled = true; request.abort();}, stallTimeoutMs);
+      };
       try {
+        touch();
+        const cache = chunk.url.includes(`.${chunk.sha256}.`) ? 'force-cache' : 'default';
+        const response = await fetcher(options.resolveURL?.(chunk.url) ?? chunk.url, {
+          cache, ...options.requestInit, ...(attempt ? {cache:'reload' as RequestCache} : {}), signal:request.signal,
+        });
+        if (!response.ok || !response.body) {
+          retryable = response.status === 408 || response.status === 429 || response.status >= 500;
+          await response.body?.cancel();
+          throw new Error(`Model chunk request failed: ${response.status}`);
+        }
+        reader = response.body.getReader();
+        let received = 0;
         for (;;) {
           const {value, done} = await reader.read();
           if (done) break;
-          if (received + value.byteLength > chunk.byteLength) throw new Error('Model chunk is longer than expected');
+          if (received + value.byteLength > chunk.byteLength) {
+            retryable = false;
+            throw new Error('Model chunk is longer than expected');
+          }
           bytes.set(value, chunk.byteOffset + received);
           received += value.byteLength;
-          loaded += value.byteLength;
-          options.onProgress?.(loaded, transport.byteLength);
-          options.onBytes?.(bytes,loaded);
+          touch();
+          // Legacy single-file transports retain their streaming decode path.
+          // Parallel transports expose only a contiguous, verified prefix below.
+          if (transport.chunks.length === 1) options.onBytes?.(bytes, received);
         }
+        clearTimeout(timer!);
         if (received !== chunk.byteLength) throw new Error('Model chunk is shorter than expected');
+        const hash = await crypto.subtle.digest('SHA-256', bytes.subarray(chunk.byteOffset, chunk.byteOffset + chunk.byteLength));
+        const hex = Array.from(new Uint8Array(hash), value => value.toString(16).padStart(2, '0')).join('');
+        if (hex !== chunk.sha256) throw new Error('Model chunk integrity check failed');
+        return;
       } catch (error) {
-        await reader.cancel().catch(() => {});
-        throw error;
+        if (reader) await reader.cancel().catch(() => {});
+        if (abort.signal.aborted || !retryable || attempt === 2) {
+          throw stalled ? new Error('Model chunk download stalled') : error;
+        }
       } finally {
-        reader.releaseLock();
+        clearTimeout(timer!);
+        abort.signal.removeEventListener('abort', cancel);
+        reader?.releaseLock();
       }
+      await new Promise(resolve => setTimeout(resolve, retryDelayMs * (attempt + 1)));
+    }
+  };
+
+  const consume = async () => {
+    while (next < transport.chunks.length) {
+      if (abort.signal.aborted) throw new Error('Model download cancelled');
+      const index = next++;
+      const chunk = transport.chunks[index];
+      if (transport.bundle) {
+        const start = transport.bundle.byteOffset + chunk.byteOffset;
+        const source = await fetchBundleSlice(transport.bundle.transport, start, chunk.byteLength, options);
+        bytes.set(source, chunk.byteOffset);
+        const hash = await crypto.subtle.digest('SHA-256', bytes.subarray(chunk.byteOffset, chunk.byteOffset + chunk.byteLength));
+        if (Array.from(new Uint8Array(hash), value => value.toString(16).padStart(2, '0')).join('') !== chunk.sha256) {
+          throw new Error('Model chunk integrity check failed');
+        }
+      } else {
+        await downloadChunk(chunk);
       }
-      // Verify each bounded chunk, without making another full-model ArrayBuffer.
-      const hash = await crypto.subtle.digest('SHA-256', bytes.subarray(chunk.byteOffset, chunk.byteOffset + chunk.byteLength));
-      const hex = Array.from(new Uint8Array(hash), value => value.toString(16).padStart(2, '0')).join('');
-      if (hex !== chunk.sha256) throw new Error('Model chunk integrity check failed');
+      loaded += chunk.byteLength;
+      options.onProgress?.(loaded, transport.byteLength);
+      verified[index] = true;
+      while (contiguous < verified.length && verified[contiguous]) contiguous++;
+      if (contiguous) {
+        const last = transport.chunks[contiguous - 1];
+        options.onBytes?.(bytes, last.byteOffset + last.byteLength);
+      }
     }
   };
   try {
-    await Promise.all(Array.from({length:Math.min(2, transport.chunks.length)}, consume));
+    await Promise.all(Array.from({length:Math.min(4, transport.chunks.length)}, consume));
+    if (transport.chunks.length > 1) {
+      const hash = await crypto.subtle.digest('SHA-256', bytes);
+      if (Array.from(new Uint8Array(hash), value => value.toString(16).padStart(2, '0')).join('') !== transport.sha256) {
+        throw new Error('Model transport integrity check failed');
+      }
+    }
     if (!transport.encoding) return bytes.buffer;
     const decoded = typeof DecompressionStream !== 'undefined'
       ? await new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer()

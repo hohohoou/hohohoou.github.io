@@ -65,7 +65,7 @@ export function omitDevelopmentModels() {
       }
       const total=plans.reduce((sum,plan)=>sum+plan.transport.byteLength,0);
       if(plans.length>1 && total<=16*1024*1024){
-        const bundle=createChunkPlan(Buffer.concat(plans.flatMap(plan=>plan.assets.map(asset=>asset.source))),'/assets/opening-scene.glb');
+        const bundle=createChunkPlan(Buffer.concat(plans.flatMap(plan=>plan.assets.map(asset=>asset.source))),'/assets/opening-scene.glb', Math.max(1024 * 1024, Math.ceil(total / 4)));
         let byteOffset=0;
         for(const plan of plans){plan.transport.bundle={transport:bundle.transport,byteOffset};byteOffset+=plan.transport.byteLength;}
         for(const asset of bundle.assets)this.emitFile(asset);
